@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>whitelist-proxy admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+  h1 { font-size: 1.25rem; }
+  nav button { margin-right: .5rem; padding: .4rem .8rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { border: 1px solid #888; padding: .3rem .5rem; text-align: left; font-size: .85rem; }
+  th { background: #eee; }
+  input[type=text] { padding: .35rem; margin-right: .5rem; }
+  .ok { color: #0a0; font-weight: bold; }
+  .deny { color: #c00; font-weight: bold; }
+  form, .filters { margin: 1rem 0; }
+  .pager { margin-top: .5rem; }
+  #msg { margin: .5rem 0; color: #c00; }
+</style>
+</head>
+<body>
+<h1>whitelist-proxy admin</h1>
+<div id="msg"></div>
+<nav>
+  <button onclick="show('whitelist')">Whitelist</button>
+  <button onclick="show('attempts')">Access attempts</button>
+</nav>
+
+<section id="whitelist">
+  <h2>Whitelist</h2>
+  <form id="addForm">
+    <input type="text" id="entry" placeholder="IP or CIDR, e.g. 1.2.3.4 or 10.0.0.0/8" required>
+    <input type="text" id="comment" placeholder="comment (optional)">
+    <button type="submit">Add</button>
+  </form>
+  <table>
+    <thead><tr><th>ID</th><th>Entry</th><th>Comment</th><th>Created</th><th></th></tr></thead>
+    <tbody id="wlBody"></tbody>
+  </table>
+</section>
+
+<section id="attempts" style="display:none">
+  <h2>Access attempts</h2>
+  <div class="filters">
+    <label>Allowed
+      <select id="fAllowed">
+        <option value="">all</option>
+        <option value="true">allowed</option>
+        <option value="false">denied</option>
+      </select>
+    </label>
+    <input type="text" id="fIp" placeholder="filter by IP">
+    <button onclick="loadAttempts(1)">Apply</button>
+  </div>
+  <table>
+    <thead><tr><th>ID</th><th>Time</th><th>Client IP</th><th>Allowed</th><th>Method</th><th>Path</th><th>Status</th><th>ms</th><th></th></tr></thead>
+    <tbody id="atBody"></tbody>
+  </table>
+  <div class="pager">
+    <button onclick="loadAttempts(page-1)">&laquo; prev</button>
+    <span id="atInfo"></span>
+    <button onclick="loadAttempts(page+1)">next &raquo;</button>
+  </div>
+</section>
+
+<script>
+let page = 1;
+let limit = 50;
+
+function show(which) {
+  document.getElementById('whitelist').style.display = which === 'whitelist' ? '' : 'none';
+  document.getElementById('attempts').style.display = which === 'attempts' ? '' : 'none';
+  if (which === 'whitelist') loadWhitelist();
+  else loadAttempts(1);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (res.status === 401) { location.reload(); throw new Error('unauthorized'); }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!res.ok) throw new Error((data && (data.error || data.message)) || res.status + ' ' + text);
+  return data;
+}
+
+async function loadWhitelist() {
+  try {
+    const entries = await api('/api/whitelist');
+    const body = document.getElementById('wlBody');
+    body.innerHTML = entries.map(e =>
+      '<tr><td>' + e.id + '</td><td><code>' + escapeHtml(e.entry) + '</code></td><td>' + escapeHtml(e.comment) + '</td><td>' + escapeHtml(e.created_at) + '</td>' +
+      '<td><button onclick="delEntry(' + e.id + ')">delete</button></td></tr>').join('');
+  } catch (err) { msg(err.message); }
+}
+
+async function delEntry(id) {
+  try {
+    await api('/api/whitelist/' + id, { method: 'DELETE' });
+    loadWhitelist();
+  } catch (err) { msg(err.message); }
+}
+
+document.getElementById('addForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await api('/api/whitelist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry: document.getElementById('entry').value.trim(), comment: document.getElementById('comment').value.trim() })
+    });
+    document.getElementById('entry').value = '';
+    document.getElementById('comment').value = '';
+    loadWhitelist();
+  } catch (err) { msg(err.message); }
+});
+
+async function loadAttempts(p) {
+  if (p < 1) p = 1;
+  page = p;
+  const allowed = document.getElementById('fAllowed').value;
+  const ip = document.getElementById('fIp').value.trim();
+  const q = new URLSearchParams({ page, limit });
+  if (allowed) q.set('allowed', allowed);
+  if (ip) q.set('ip', ip);
+  try {
+    const data = await api('/api/attempts?' + q.toString());
+    const body = document.getElementById('atBody');
+    body.innerHTML = data.attempts.map(a =>
+      '<tr><td>' + a.id + '</td><td>' + escapeHtml(a.ts) + '</td><td>' + escapeHtml(a.client_ip) + '</td>' +
+      '<td class="' + (a.allowed ? 'ok' : 'deny') + '">' + (a.allowed ? 'allowed' : 'denied') + '</td>' +
+      '<td>' + escapeHtml(a.method) + '</td><td>' + escapeHtml(a.path + (a.query ? '?' + a.query : '')) + '</td>' +
+      '<td>' + a.upstream_status + '</td><td>' + a.duration_ms + '</td>' +
+      '<td>' + (a.allowed ? '' : '<button onclick="allowAttempt(' + a.id + ')">allow IP</button>') + '</td></tr>').join('');
+    const totalPages = Math.max(1, Math.ceil(data.total / limit));
+    document.getElementById('atInfo').textContent = 'page ' + page + ' of ' + totalPages + ' (' + data.total + ' total)';
+  } catch (err) { msg(err.message); }
+}
+
+async function allowAttempt(id) {
+  try {
+    await api('/api/attempts/' + id + '/allow', { method: 'POST' });
+    loadAttempts(page);
+  } catch (err) { msg(err.message); }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function msg(m) { document.getElementById('msg').textContent = m; }
+
+loadWhitelist();
+</script>
+</body>
+</html>
