@@ -85,12 +85,17 @@ func TestWhitelistInvalidEntry(t *testing.T) {
 
 func newTestProxy(t *testing.T, upstream string) (*Proxy, *AccessLog) {
 	t.Helper()
+	return newTestProxyWithPaths(t, upstream, nil)
+}
+
+func newTestProxyWithPaths(t *testing.T, upstream string, allowedPaths []string) (*Proxy, *AccessLog) {
+	t.Helper()
 	wl, err := NewWhitelist(newTestDB(t), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	al := NewAccessLog(newTestDB(t))
-	p, err := NewProxy(upstream, wl, al)
+	p, err := NewProxy(upstream, allowedPaths, wl, al)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,5 +180,65 @@ func TestHealthzNotBlocked(t *testing.T) {
 	p.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("healthz status = %d, want 200", rec.Code)
+	}
+}
+
+func TestPathAllowlist(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	p, al := newTestProxyWithPaths(t, upstream.URL, []string{"/v1"})
+	if _, err := p.wl.Add("127.0.0.1", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Allowed path is proxied.
+	req := httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("allowed path status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// Non-allowed path returns 404 and is logged as denied with reason "path".
+	req = httptest.NewRequest(http.MethodGet, "http://proxy.local/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rec = httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("blocked path status = %d, want 404", rec.Code)
+	}
+	attempts, _, err := al.Query(1, 10, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(attempts))
+	}
+	if attempts[0].Allowed || attempts[0].Reason != "path" {
+		t.Fatalf("expected denied with reason=path, got %+v", attempts[0])
+	}
+}
+
+func TestPathAllowlistEmptyAllowsAll(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, _ := newTestProxy(t, upstream.URL)
+	if _, err := p.wl.Add("127.0.0.1", "test"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://proxy.local/anything", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }

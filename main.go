@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS access_log (
   ts TEXT NOT NULL,
   client_ip TEXT NOT NULL,
   allowed INTEGER NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
   method TEXT NOT NULL,
   path TEXT NOT NULL,
   query TEXT NOT NULL,
@@ -76,7 +77,7 @@ func run() error {
 	}
 	al := NewAccessLog(db)
 
-	proxy, err := NewProxy(cfg.Upstream, wl, al)
+	proxy, err := NewProxy(cfg.Upstream, cfg.AllowedPaths, wl, al)
 	if err != nil {
 		return err
 	}

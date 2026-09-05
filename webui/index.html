@@ -55,7 +55,7 @@
     <button onclick="loadAttempts(1)">Apply</button>
   </div>
   <table>
-    <thead><tr><th>ID</th><th>Time</th><th>Client IP</th><th>Allowed</th><th>Method</th><th>Path</th><th>Status</th><th>ms</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Time</th><th>Client IP</th><th>Allowed</th><th>Reason</th><th>Method</th><th>Path</th><th>Status</th><th>ms</th><th></th></tr></thead>
     <tbody id="atBody"></tbody>
   </table>
   <div class="pager">
@@ -131,6 +131,7 @@ async function loadAttempts(p) {
     body.innerHTML = data.attempts.map(a =>
       '<tr><td>' + a.id + '</td><td>' + escapeHtml(a.ts) + '</td><td>' + escapeHtml(a.client_ip) + '</td>' +
       '<td class="' + (a.allowed ? 'ok' : 'deny') + '">' + (a.allowed ? 'allowed' : 'denied') + '</td>' +
+      '<td>' + escapeHtml(a.reason || '') + '</td>' +
       '<td>' + escapeHtml(a.method) + '</td><td>' + escapeHtml(a.path + (a.query ? '?' + a.query : '')) + '</td>' +
       '<td>' + a.upstream_status + '</td><td>' + a.duration_ms + '</td>' +
       '<td>' + (a.allowed ? '' : '<button onclick="allowAttempt(' + a.id + ')">allow IP</button>') + '</td></tr>').join('');

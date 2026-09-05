@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -48,13 +49,14 @@ func openAIError(message, typ, code string) map[string]any {
 }
 
 type Proxy struct {
-	wl       *Whitelist
-	log      *AccessLog
-	upstream *url.URL
-	rp       *httputil.ReverseProxy
+	wl           *Whitelist
+	log          *AccessLog
+	upstream     *url.URL
+	allowedPaths []string
+	rp           *httputil.ReverseProxy
 }
 
-func NewProxy(upstream string, wl *Whitelist, al *AccessLog) (*Proxy, error) {
+func NewProxy(upstream string, allowedPaths []string, wl *Whitelist, al *AccessLog) (*Proxy, error) {
 	u, err := url.Parse(upstream)
 	if err != nil {
 		return nil, err
@@ -63,7 +65,7 @@ func NewProxy(upstream string, wl *Whitelist, al *AccessLog) (*Proxy, error) {
 		return nil, fmt.Errorf("UPSTREAM must be an http(s):// URL")
 	}
 
-	p := &Proxy{wl: wl, log: al, upstream: u}
+	p := &Proxy{wl: wl, log: al, upstream: u, allowedPaths: allowedPaths}
 	p.rp = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(u)
@@ -98,6 +100,20 @@ func parseAddrPort(s string) (netip.AddrPort, bool) {
 	return ap, true
 }
 
+// pathAllowed reports whether the request path is within an allowed prefix.
+// An empty allowedPaths list permits every path.
+func pathAllowed(path string, allowedPaths []string) bool {
+	if len(allowedPaths) == 0 {
+		return true
+	}
+	for _, p := range allowedPaths {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
 		w.WriteHeader(http.StatusOK)
@@ -114,19 +130,33 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w}
+
 	allowed := p.wl.Allow(ip)
+	reason := ""
+	if !allowed {
+		reason = "ip"
+	} else if !pathAllowed(r.URL.Path, p.allowedPaths) {
+		allowed = false
+		reason = "path"
+	}
+
 	if allowed {
 		p.rp.ServeHTTP(sw, r)
-	} else {
+	} else if reason == "ip" {
 		writeJSON(sw, http.StatusForbidden, openAIError(
 			fmt.Sprintf("your IP address %s is not allowed to access this endpoint", ip),
 			"access_denied", "forbidden"))
+	} else {
+		writeJSON(sw, http.StatusNotFound, openAIError(
+			fmt.Sprintf("path %s is not exposed", r.URL.Path),
+			"not_found", "not_found"))
 	}
 
 	p.log.Record(Attempt{
 		TS:             time.Now().UTC().Format(time.RFC3339),
 		ClientIP:       ip.String(),
 		Allowed:        allowed,
+		Reason:         reason,
 		Method:         r.Method,
 		Path:           r.URL.Path,
 		Query:          r.URL.RawQuery,

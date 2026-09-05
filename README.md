@@ -20,11 +20,12 @@ which makes IP-based allow-listing useless.
 - **Proxy port** `8080` — accepts connections and **requires** a valid PROXY
   protocol header (fail-closed). Requests from an IP/CIDR on the whitelist are
   reverse-proxied to `UPSTREAM`; all others get a `403` OpenAI-compatible error.
-  Streaming/SSE responses are flushed through. `/healthz` always returns `200`
-  and is not logged as an attempt.
+  With `ALLOW_PATHS` set, only paths under the listed prefixes are proxied;
+  everything else gets a `404`. Streaming/SSE responses are flushed through.
+  `/healthz` always returns `200` and is not logged as an attempt.
 - **Admin port** `8081` — basic-auth protected web UI + JSON API to manage the
-  whitelist and to browse every access attempt (timestamp, client IP, allow/deny,
-  method, path, status, duration).
+  whitelist and to browse every access attempt (timestamp, client IP, allow/deny
+  with reason, method, path, status, duration).
 - State is stored in a single SQLite database (whitelist + access log).
 
 ## Configuration (environment)
@@ -40,6 +41,7 @@ which makes IP-based allow-listing useless.
 | `EMPTY_WHITELIST` | `deny` | Behavior with an empty whitelist: `deny` (fail-closed) or `allow` |
 | `LOG_RETENTION_DAYS` | `30` | Access log retention; old entries are trimmed hourly |
 | `ACCEPT_PROXY` | `true` | Require a valid PROXY protocol header on the proxy port |
+| `ALLOW_PATHS` | *(empty)* | Comma-separated path prefixes that may be proxied (e.g. `/v1`). Empty = all paths allowed. Other paths return `404` and are logged as denied with reason `path`. |
 
 ## Admin API
 

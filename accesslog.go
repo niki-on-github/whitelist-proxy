@@ -13,6 +13,7 @@ type Attempt struct {
 	TS             string `json:"ts"`
 	ClientIP       string `json:"client_ip"`
 	Allowed        bool   `json:"allowed"`
+	Reason         string `json:"reason"`
 	Method         string `json:"method"`
 	Path           string `json:"path"`
 	Query          string `json:"query"`
@@ -39,9 +40,9 @@ func (l *AccessLog) Record(a Attempt) {
 		allowed = 1
 	}
 	if _, err := l.db.Exec(`INSERT INTO access_log
-		(ts, client_ip, allowed, method, path, query, user_agent, upstream_status, duration_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.TS, a.ClientIP, allowed, a.Method, a.Path, a.Query, a.UserAgent, a.UpstreamStatus, a.DurationMS); err != nil {
+		(ts, client_ip, allowed, reason, method, path, query, user_agent, upstream_status, duration_ms)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.TS, a.ClientIP, allowed, a.Reason, a.Method, a.Path, a.Query, a.UserAgent, a.UpstreamStatus, a.DurationMS); err != nil {
 		log.Printf("accesslog: failed to record attempt: %v", err)
 		return
 	}
@@ -83,7 +84,7 @@ func (l *AccessLog) Query(page, limit int, allowed *bool, ip string) ([]Attempt,
 	}
 	offset := (page - 1) * limit
 
-	rows, err := l.db.Query(`SELECT id, ts, client_ip, allowed, method, path, query, user_agent, upstream_status, duration_ms
+	rows, err := l.db.Query(`SELECT id, ts, client_ip, allowed, reason, method, path, query, user_agent, upstream_status, duration_ms
 		FROM access_log `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
@@ -94,7 +95,7 @@ func (l *AccessLog) Query(page, limit int, allowed *bool, ip string) ([]Attempt,
 	for rows.Next() {
 		var a Attempt
 		var allowedInt int
-		if err := rows.Scan(&a.ID, &a.TS, &a.ClientIP, &allowedInt, &a.Method, &a.Path, &a.Query, &a.UserAgent, &a.UpstreamStatus, &a.DurationMS); err != nil {
+		if err := rows.Scan(&a.ID, &a.TS, &a.ClientIP, &allowedInt, &a.Reason, &a.Method, &a.Path, &a.Query, &a.UserAgent, &a.UpstreamStatus, &a.DurationMS); err != nil {
 			return nil, 0, err
 		}
 		a.Allowed = allowedInt == 1

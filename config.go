@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -16,6 +17,7 @@ type Config struct {
 	EmptyWhitelist   string
 	LogRetentionDays int
 	AcceptProxy      bool
+	AllowedPaths     []string
 }
 
 func env(key, def string) string {
@@ -68,6 +70,20 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	allowedPaths := []string{}
+	if v := os.Getenv("ALLOW_PATHS"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if !strings.HasPrefix(p, "/") {
+				return nil, fmt.Errorf("ALLOW_PATHS entries must start with '/', got %q", p)
+			}
+			allowedPaths = append(allowedPaths, p)
+		}
+	}
+
 	return &Config{
 		ProxyListen:      env("PROXY_LISTEN", "0.0.0.0:8080"),
 		AdminListen:      env("ADMIN_LISTEN", "0.0.0.0:8081"),
@@ -78,5 +94,6 @@ func LoadConfig() (*Config, error) {
 		EmptyWhitelist:   empty,
 		LogRetentionDays: retention,
 		AcceptProxy:      acceptProxy,
+		AllowedPaths:     allowedPaths,
 	}, nil
 }
