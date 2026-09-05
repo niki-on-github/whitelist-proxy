@@ -16,15 +16,14 @@ type WhitelistEntry struct {
 }
 
 type Whitelist struct {
-	mu         sync.RWMutex
-	db         *sql.DB
-	prefixes   []netip.Prefix
-	entries    []WhitelistEntry
-	emptyAllow bool
+	mu       sync.RWMutex
+	db       *sql.DB
+	prefixes []netip.Prefix
+	entries  []WhitelistEntry
 }
 
-func NewWhitelist(db *sql.DB, emptyAllow bool) (*Whitelist, error) {
-	w := &Whitelist{db: db, emptyAllow: emptyAllow}
+func NewWhitelist(db *sql.DB) (*Whitelist, error) {
+	w := &Whitelist{db: db}
 	if err := w.reload(); err != nil {
 		return nil, err
 	}
@@ -77,9 +76,6 @@ func (w *Whitelist) reload() error {
 func (w *Whitelist) Allow(ip netip.Addr) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	if len(w.prefixes) == 0 {
-		return w.emptyAllow
-	}
 	for _, p := range w.prefixes {
 		if p.Contains(ip) {
 			return true

@@ -14,7 +14,6 @@ type Config struct {
 	AdminUser        string
 	AdminPassword    string
 	DBPath           string
-	EmptyWhitelist   string
 	LogRetentionDays int
 	AcceptProxy      bool
 	AllowedPaths     []string
@@ -57,11 +56,6 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	empty := env("EMPTY_WHITELIST", "deny")
-	if empty != "deny" && empty != "allow" {
-		return nil, fmt.Errorf("EMPTY_WHITELIST must be 'deny' or 'allow'")
-	}
-
 	acceptProxy := true
 	if v := os.Getenv("ACCEPT_PROXY"); v != "" {
 		acceptProxy, err = strconv.ParseBool(v)
@@ -91,7 +85,6 @@ func LoadConfig() (*Config, error) {
 		AdminUser:        user,
 		AdminPassword:    pass,
 		DBPath:           env("DB_PATH", "data/whitelist-proxy.db"),
-		EmptyWhitelist:   empty,
 		LogRetentionDays: retention,
 		AcceptProxy:      acceptProxy,
 		AllowedPaths:     allowedPaths,

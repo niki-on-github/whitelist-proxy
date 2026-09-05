@@ -71,7 +71,7 @@ func run() error {
 	}
 	defer db.Close()
 
-	wl, err := NewWhitelist(db, cfg.EmptyWhitelist == "allow")
+	wl, err := NewWhitelist(db)
 	if err != nil {
 		return err
 	}

@@ -25,27 +25,17 @@ func newTestDB(t *testing.T) *sql.DB {
 }
 
 func TestWhitelistEmptyDeny(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t), false)
+	wl, err := NewWhitelist(newTestDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if wl.Allow(netip.MustParseAddr("8.8.8.8")) {
-		t.Fatal("empty whitelist with emptyAllow=false must deny everything")
-	}
-}
-
-func TestWhitelistEmptyAllow(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !wl.Allow(netip.MustParseAddr("8.8.8.8")) {
-		t.Fatal("empty whitelist with emptyAllow=true must allow everything")
+		t.Fatal("empty whitelist must deny everything")
 	}
 }
 
 func TestWhitelistMatching(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t), false)
+	wl, err := NewWhitelist(newTestDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +64,7 @@ func TestWhitelistMatching(t *testing.T) {
 }
 
 func TestWhitelistInvalidEntry(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t), false)
+	wl, err := NewWhitelist(newTestDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +80,7 @@ func newTestProxy(t *testing.T, upstream string) (*Proxy, *AccessLog) {
 
 func newTestProxyWithPaths(t *testing.T, upstream string, allowedPaths []string) (*Proxy, *AccessLog) {
 	t.Helper()
-	wl, err := NewWhitelist(newTestDB(t), false)
+	wl, err := NewWhitelist(newTestDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
