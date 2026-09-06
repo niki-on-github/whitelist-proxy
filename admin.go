@@ -18,15 +18,16 @@ type Admin struct {
 	log   *AccessLog
 	user  string
 	pass  string
+	auth  bool
 	index []byte
 }
 
-func NewAdmin(wl *Whitelist, al *AccessLog, user, pass string) *Admin {
+func NewAdmin(wl *Whitelist, al *AccessLog, user, pass string, auth bool) *Admin {
 	b, err := webuiFS.ReadFile("webui/index.html")
 	if err != nil {
 		panic(err)
 	}
-	return &Admin{wl: wl, log: al, user: user, pass: pass, index: b}
+	return &Admin{wl: wl, log: al, user: user, pass: pass, auth: auth, index: b}
 }
 
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +37,7 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !a.authorized(r) {
+	if a.auth && !a.authorized(r) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="whitelist-proxy admin"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

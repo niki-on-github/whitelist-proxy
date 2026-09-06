@@ -81,7 +81,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	admin := NewAdmin(wl, al, cfg.AdminUser, cfg.AdminPassword)
+	admin := NewAdmin(wl, al, cfg.AdminUser, cfg.AdminPassword, cfg.AdminAuth)
 
 	servers := []*http.Server{
 		{Addr: cfg.ProxyListen, Handler: proxy},

@@ -16,6 +16,7 @@ type Config struct {
 	DBPath           string
 	LogRetentionDays int
 	AcceptProxy      bool
+	AdminAuth        bool
 	AllowedPaths     []string
 }
 
@@ -64,6 +65,14 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	adminAuth := true
+	if v := os.Getenv("ADMIN_AUTH"); v != "" {
+		adminAuth, err = strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("ADMIN_AUTH must be a boolean")
+		}
+	}
+
 	allowedPaths := []string{}
 	if v := os.Getenv("ALLOW_PATHS"); v != "" {
 		for _, p := range strings.Split(v, ",") {
@@ -87,6 +96,7 @@ func LoadConfig() (*Config, error) {
 		DBPath:           env("DB_PATH", "data/whitelist-proxy.db"),
 		LogRetentionDays: retention,
 		AcceptProxy:      acceptProxy,
+		AdminAuth:        adminAuth,
 		AllowedPaths:     allowedPaths,
 	}, nil
 }
