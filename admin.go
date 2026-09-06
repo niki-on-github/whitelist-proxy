@@ -122,7 +122,7 @@ func (a *Admin) listAttempts(w http.ResponseWriter, r *http.Request) {
 		b := v == "true"
 		allowed = &b
 	}
-	attempts, total, err := a.log.Query(page, limit, allowed, q.Get("ip"))
+	attempts, total, err := a.log.Query(page, limit, allowed, q.Get("path"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

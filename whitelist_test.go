@@ -84,7 +84,7 @@ func newTestProxyWithPaths(t *testing.T, upstream string, allowedPaths []string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	al := NewAccessLog(newTestDB(t))
+	al := NewAccessLog(10000)
 	p, err := NewProxy(upstream, allowedPaths, wl, al)
 	if err != nil {
 		t.Fatal(err)
@@ -230,5 +230,100 @@ func TestPathAllowlistEmptyAllowsAll(t *testing.T) {
 	p.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAccessLogRingBufferEviction(t *testing.T) {
+	al := NewAccessLog(3)
+	for i := 0; i < 5; i++ {
+		al.Record(Attempt{TS: "t", ClientIP: "10.0.0.1", Allowed: true, Method: "GET", Path: "/v1", Query: "", UserAgent: "", UpstreamStatus: 200, DurationMS: 1})
+	}
+	attempts, total, err := al.Query(1, 10, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(attempts) != 3 {
+		t.Fatalf("expected 3 retained attempts, got total=%d len=%d", total, len(attempts))
+	}
+	if attempts[0].ID != 4 {
+		t.Fatalf("newest attempt ID = %d, want 4", attempts[0].ID)
+	}
+	if attempts[2].ID != 2 {
+		t.Fatalf("oldest retained attempt ID = %d, want 2", attempts[2].ID)
+	}
+}
+
+func TestAccessLogPathFilter(t *testing.T) {
+	al := NewAccessLog(10)
+	for _, p := range []string{"/v1/models", "/v1/chat", "/healthz"} {
+		al.Record(Attempt{TS: "t", ClientIP: "10.0.0.1", Allowed: false, Method: "GET", Path: p, Query: "", UserAgent: "", UpstreamStatus: 0, DurationMS: 1})
+	}
+	attempts, total, err := al.Query(1, 10, nil, "/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(attempts) != 2 {
+		t.Fatalf("expected 2 /v1 attempts, got total=%d len=%d", total, len(attempts))
+	}
+
+	denied := false
+	attempts, total, err = al.Query(1, 10, &denied, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Fatalf("expected 3 denied attempts, got %d", total)
+	}
+
+	allowed := true
+	attempts, _, err = al.Query(1, 10, &allowed, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 0 {
+		t.Fatalf("expected 0 allowed attempts, got %d", len(attempts))
+	}
+}
+
+func TestAccessLogNotPersistedToSQLite(t *testing.T) {
+	db := newTestDB(t)
+	wl, err := NewWhitelist(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	al := NewAccessLog(100)
+	p, err := NewProxy("http://127.0.0.1:1", nil, wl, al)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	req.RemoteAddr = "203.0.113.7:1234"
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='access_log'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("access_log table must not exist; found %d", count)
+	}
+
+	if _, err := wl.Add("203.0.113.7", "test"); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	req.RemoteAddr = "203.0.113.7:1234"
+	rec = httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("allowed attempt status = %d, want 502", rec.Code)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='access_log'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("allowed attempts must also not be persisted; access_log found %d", count)
 	}
 }

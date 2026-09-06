@@ -28,9 +28,11 @@ which makes IP-based allow-listing useless.
   Streaming/SSE responses are flushed through. `/healthz` always returns `200` and
   is not logged as an attempt.
 - **Admin port** `8081` — basic-auth protected web UI + JSON API to manage the
-  whitelist and to browse every access attempt (timestamp, client IP, allow/deny
-  with reason, method, path, status, duration).
-- State is stored in a single SQLite database (whitelist + access log).
+  whitelist and to browse access attempts (timestamp, client IP, allow/deny with
+  reason, method, path, status, duration).
+- The whitelist (allow list) is stored in a single SQLite database. The **access
+  log lives only in RAM** as a bounded circular buffer (`LOG_BUFFER_SIZE`, default
+  10000 entries) and is **never persisted** — it is lost on restart.
 
 ## Configuration (environment)
 
@@ -41,8 +43,8 @@ which makes IP-based allow-listing useless.
 | `ADMIN_PASSWORD` | *(required)* | Basic auth password for the admin UI |
 | `PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener address |
 | `ADMIN_LISTEN` | `0.0.0.0:8081` | Admin listener address |
-| `DB_PATH` | `data/whitelist-proxy.db` | SQLite database file |
-| `LOG_RETENTION_DAYS` | `30` | Access log retention; old entries are trimmed hourly |
+| `DB_PATH` | `data/whitelist-proxy.db` | SQLite database file (whitelist only) |
+| `LOG_BUFFER_SIZE` | `10000` | Number of access attempts kept in the in-memory ring buffer; oldest entries are evicted when full |
 | `ACCEPT_PROXY` | `true` | Require a valid PROXY protocol header on the proxy port |
 | `ALLOW_PATHS` | *(empty)* | Comma-separated path prefixes that may be proxied (e.g. `/v1`). Empty = all paths allowed. Other paths are denied with the same generic `403` and logged as denied with reason `path`. |
 
@@ -53,7 +55,7 @@ All endpoints require basic auth.
 - `GET /api/whitelist` — list entries
 - `POST /api/whitelist` — add entry `{"entry": "IP or CIDR", "comment": "..."}`
 - `DELETE /api/whitelist/{id}` — remove entry
-- `GET /api/attempts?page=&limit=&allowed=&ip=` — access log (paginated, filterable)
+- `GET /api/attempts?page=&limit=&allowed=&path=` — access attempts (in-memory ring buffer, paginated, filterable by allow status and path)
 - `POST /api/attempts/{id}/allow` — one-click whitelist the IP of a denied attempt
 
 ## Security notes
@@ -63,6 +65,7 @@ All endpoints require basic auth.
 - Client-supplied `X-Forwarded-For` / `X-Real-IP` headers are always overwritten
   with the real peer IP derived from the PROXY header / socket.
 - An empty whitelist denies everything (fail-closed) — add entries via the admin UI.
+- Access attempts are only kept in RAM (ring buffer) and are lost on restart; nothing about them is written to disk.
 - Keep the admin port out of public reach (cluster-internal only).
 
 ## Local development

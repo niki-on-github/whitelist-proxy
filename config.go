@@ -8,16 +8,16 @@ import (
 )
 
 type Config struct {
-	ProxyListen      string
-	AdminListen      string
-	Upstream         string
-	AdminUser        string
-	AdminPassword    string
-	DBPath           string
-	LogRetentionDays int
-	AcceptProxy      bool
-	AdminAuth        bool
-	AllowedPaths     []string
+	ProxyListen     string
+	AdminListen     string
+	Upstream        string
+	AdminUser       string
+	AdminPassword   string
+	DBPath          string
+	LogBufferSize   int
+	AcceptProxy     bool
+	AdminAuth       bool
+	AllowedPaths    []string
 }
 
 func env(key, def string) string {
@@ -49,11 +49,11 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
-	retention := 30
-	if v := os.Getenv("LOG_RETENTION_DAYS"); v != "" {
-		retention, err = strconv.Atoi(v)
-		if err != nil || retention < 0 {
-			return nil, fmt.Errorf("LOG_RETENTION_DAYS must be a non-negative integer")
+	bufSize := 10000
+	if v := os.Getenv("LOG_BUFFER_SIZE"); v != "" {
+		bufSize, err = strconv.Atoi(v)
+		if err != nil || bufSize <= 0 {
+			return nil, fmt.Errorf("LOG_BUFFER_SIZE must be a positive integer")
 		}
 	}
 
@@ -94,7 +94,7 @@ func LoadConfig() (*Config, error) {
 		AdminUser:        user,
 		AdminPassword:    pass,
 		DBPath:           env("DB_PATH", "data/whitelist-proxy.db"),
-		LogRetentionDays: retention,
+		LogBufferSize:    bufSize,
 		AcceptProxy:      acceptProxy,
 		AdminAuth:        adminAuth,
 		AllowedPaths:     allowedPaths,

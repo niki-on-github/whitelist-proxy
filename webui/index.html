@@ -51,7 +51,7 @@
         <option value="false">denied</option>
       </select>
     </label>
-    <input type="text" id="fIp" placeholder="filter by IP">
+    <input type="text" id="fPath" placeholder="filter by path">
     <button onclick="loadAttempts(1)">Apply</button>
   </div>
   <table>
@@ -121,10 +121,10 @@ async function loadAttempts(p) {
   if (p < 1) p = 1;
   page = p;
   const allowed = document.getElementById('fAllowed').value;
-  const ip = document.getElementById('fIp').value.trim();
+  const path = document.getElementById('fPath').value.trim();
   const q = new URLSearchParams({ page, limit });
   if (allowed) q.set('allowed', allowed);
-  if (ip) q.set('ip', ip);
+  if (path) q.set('path', path);
   try {
     const data = await api('/api/attempts?' + q.toString());
     const body = document.getElementById('atBody');

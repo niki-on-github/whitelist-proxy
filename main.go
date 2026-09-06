@@ -24,21 +24,6 @@ CREATE TABLE IF NOT EXISTS whitelist (
   comment TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS access_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts TEXT NOT NULL,
-  client_ip TEXT NOT NULL,
-  allowed INTEGER NOT NULL,
-  reason TEXT NOT NULL DEFAULT '',
-  method TEXT NOT NULL,
-  path TEXT NOT NULL,
-  query TEXT NOT NULL,
-  user_agent TEXT NOT NULL,
-  upstream_status INTEGER NOT NULL,
-  duration_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_access_log_ts ON access_log(ts);
-CREATE INDEX IF NOT EXISTS idx_access_log_ip ON access_log(client_ip);
 `
 
 func openDB(path string) (*sql.DB, error) {
@@ -75,7 +60,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	al := NewAccessLog(db)
+	al := NewAccessLog(cfg.LogBufferSize)
 
 	proxy, err := NewProxy(cfg.Upstream, cfg.AllowedPaths, wl, al)
 	if err != nil {
@@ -117,19 +102,6 @@ func run() error {
 			}
 		}(i, s, lns[i])
 	}
-
-	go func() {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				al.Trim(cfg.LogRetentionDays)
-			}
-		}
-	}()
 
 	select {
 	case <-ctx.Done():
