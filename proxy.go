@@ -142,14 +142,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if allowed {
 		p.rp.ServeHTTP(sw, r)
-	} else if reason == "ip" {
-		writeJSON(sw, http.StatusForbidden, openAIError(
-			fmt.Sprintf("your IP address %s is not allowed to access this endpoint", ip),
-			"access_denied", "forbidden"))
 	} else {
-		writeJSON(sw, http.StatusNotFound, openAIError(
-			fmt.Sprintf("path %s is not exposed", r.URL.Path),
-			"not_found", "not_found"))
+		// Generic denial: never reveal the whitelist, allowed paths, or the
+		// client IP to the caller. Real details go to the container log only.
+		log.Printf("denied: ip=%s reason=%s method=%s path=%s status=403", ip, reason, r.Method, r.URL.Path)
+		writeJSON(sw, http.StatusForbidden, openAIError(
+			"access denied", "access_denied", "forbidden"))
 	}
 
 	p.log.Record(Attempt{

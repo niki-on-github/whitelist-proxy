@@ -194,13 +194,13 @@ func TestPathAllowlist(t *testing.T) {
 		t.Fatalf("allowed path status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 
-	// Non-allowed path returns 404 and is logged as denied with reason "path".
+	// Non-allowed path returns 403 (generic denial) and is logged as denied with reason "path".
 	req = httptest.NewRequest(http.MethodGet, "http://proxy.local/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
 	rec = httptest.NewRecorder()
 	p.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("blocked path status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("blocked path status = %d, want 403", rec.Code)
 	}
 	attempts, _, err := al.Query(1, 10, nil, "")
 	if err != nil {
