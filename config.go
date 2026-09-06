@@ -95,8 +95,8 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		ProxyListen:      env("PROXY_LISTEN", "0.0.0.0:8080"),
-		AdminListen:      env("ADMIN_LISTEN", "0.0.0.0:8081"),
+		ProxyListen:      env("PROXY_LISTEN", "127.0.0.1:8080"),
+		AdminListen:      env("ADMIN_LISTEN", "127.0.0.1:8081"),
 		Upstream:         upstream,
 		AdminUser:        user,
 		AdminPassword:    pass,

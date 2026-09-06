@@ -4,7 +4,9 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -80,11 +82,11 @@ func (a *Admin) authorized(r *http.Request) bool {
 
 func (a *Admin) addWhitelist(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Entry   string   `json:"entry"`
-		Comment string   `json:"comment"`
-		Days    []string `json:"days"`
-		Start   string   `json:"start"`
-		End     string   `json:"end"`
+		Entry   string `json:"entry"`
+		Comment string `json:"comment"`
+		Days    []int  `json:"days"`
+		Start   string `json:"start"`
+		End     string `json:"end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -145,7 +147,27 @@ func (a *Admin) allowAttempt(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "attempt not found"})
 		return
 	}
-	e, err := a.wl.Add(ip, fmt.Sprintf("allowed from attempt #%d", id))
+
+	// Optional body: {"comment", "days": [1..7], "start", "end"}. An empty body
+	// (or just a comment) is valid and simply allows the IP without a window.
+	comment := fmt.Sprintf("allowed from attempt #%d", id)
+	var req struct {
+		Comment string `json:"comment"`
+		Days    []int  `json:"days"`
+		Start   string `json:"start"`
+		End     string `json:"end"`
+	}
+	start, end := "", ""
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if req.Comment != "" {
+		comment = req.Comment
+	}
+	days, start, end := req.Days, req.Start, req.End
+
+	e, err := a.wl.AddScheduled(ip, comment, days, start, end)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

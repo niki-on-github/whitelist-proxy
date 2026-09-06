@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 )
@@ -82,6 +83,9 @@ func NewProxy(upstream string, allowedPaths []string, wl *Whitelist, al *AccessL
 				proto = "https"
 			}
 			pr.Out.Header.Set("X-Forwarded-Proto", proto)
+			// Never trust a client-supplied Forwarded header: the real peer
+			// is known only from the PROXY protocol / socket.
+			pr.Out.Header.Del("Forwarded")
 		},
 		FlushInterval: 100 * time.Millisecond,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -102,12 +106,25 @@ func parseAddrPort(s string) (netip.AddrPort, bool) {
 
 // pathAllowed reports whether the request path is within an allowed prefix.
 // An empty allowedPaths list permits every path.
-func pathAllowed(path string, allowedPaths []string) bool {
+//
+// The raw path must match at a segment boundary, and the cleaned path must
+// still resolve inside the prefix. This stops crafted paths such as
+// "/v1/../admin" or "/v1//x" from matching an "/v1" allow rule and, depending
+// on upstream normalization, reaching endpoints outside the intended set.
+func pathAllowed(p string, allowedPaths []string) bool {
 	if len(allowedPaths) == 0 {
 		return true
 	}
-	for _, p := range allowedPaths {
-		if strings.HasPrefix(path, p) {
+	clean := path.Clean(p)
+	for _, pref := range allowedPaths {
+		base := strings.TrimSuffix(pref, "/")
+		if base == "" {
+			base = "/"
+		}
+		if base != "/" && p != base && !strings.HasPrefix(p, base+"/") {
+			continue
+		}
+		if base == "/" || clean == base || strings.HasPrefix(clean, base+"/") {
 			return true
 		}
 	}
@@ -142,7 +159,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Generic denial: never reveal the whitelist, allowed paths, or the
 		// client IP to the caller. Real details go to the container log only.
-		log.Printf("denied: ip=%s reason=%s method=%s path=%s status=403", ip, reason, r.Method, r.URL.Path)
+		// %q prevents an attacker-controlled path from injecting log lines.
+		log.Printf("denied: ip=%s reason=%s method=%s path=%q status=403", ip, reason, r.Method, r.URL.Path)
 		writeJSON(sw, http.StatusForbidden, openAIError(
 			"access denied", "access_denied", "forbidden"))
 	}

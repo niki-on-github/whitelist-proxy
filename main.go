@@ -43,6 +43,21 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+func makeServer(addr string, h http.Handler, stream bool) *http.Server {
+	s := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16, // 64 KiB
+	}
+	if !stream {
+		s.ReadTimeout = 60 * time.Second
+		s.WriteTimeout = 60 * time.Second
+	}
+	return s
+}
+
 func run() error {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -72,9 +87,13 @@ func run() error {
 	}
 	admin := NewAdmin(wl, al, cfg.AdminUser, cfg.AdminPassword, cfg.AdminAuth)
 
+	// The proxy must not get a read/write deadline: it streams responses (SSE)
+	// and forwards request bodies of arbitrary size and speed upstream. The
+	// header timeout and idle timeout alone bound header-stalling attackers.
+	// The admin API gets full read/write deadlines.
 	servers := []*http.Server{
-		{Addr: cfg.ProxyListen, Handler: proxy},
-		{Addr: cfg.AdminListen, Handler: admin},
+		makeServer(cfg.ProxyListen, proxy, true),
+		makeServer(cfg.AdminListen, admin, false),
 	}
 
 	lns := make([]net.Listener, 0, len(servers))

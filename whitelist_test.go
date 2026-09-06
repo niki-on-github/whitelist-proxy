@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,6 +216,43 @@ func TestPathAllowlist(t *testing.T) {
 	}
 }
 
+func TestPathAllowed(t *testing.T) {
+	allow := []string{"/v1", "/api/"}
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/v1", true},
+		{"/v1/", true},
+		{"/v1/models", true},
+		{"/v1/models/chat", true},
+		{"/v1evil", false},
+		{"/v1evil/models", false},
+		{"/v1/../admin", false},
+		{"/v1/a/../../admin", false},
+		{"/v1/../v1/models", true},
+		{"/v1/./models", true},
+		{"/v1//x", true},
+		{"//v1/models", false},
+		{"/api", true},
+		{"/api/", true},
+		{"/api/users", true},
+		{"/api/../admin", false},
+		{"/other", false},
+	}
+	for _, c := range cases {
+		if got := pathAllowed(c.path, allow); got != c.want {
+			t.Errorf("pathAllowed(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+func TestPathAllowedEmptyAllowsAll(t *testing.T) {
+	if !pathAllowed("/anything", nil) {
+		t.Fatal("empty allow list must permit every path")
+	}
+}
+
 func TestPathAllowlistEmptyAllowsAll(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -356,7 +394,7 @@ func TestWhitelistDayWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 2026-01-05 is a Monday.
-	if _, err := wl.AddScheduled("203.0.113.7", "weekdays", []string{"mon", "tue", "wed"}, "", ""); err != nil {
+	if _, err := wl.AddScheduled("203.0.113.7", "weekdays", []int{1, 2, 3}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -388,13 +426,151 @@ func TestWhitelistMixedRestrictedAndOpen(t *testing.T) {
 	}
 }
 
+func TestWhitelistDaysRoundTrip(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "", []int{7, 1, 3, 1}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	e := wl.List()[0]
+	want := []int{1, 3, 7} // deduplicated and sorted ascending
+	if len(e.Days) != len(want) {
+		t.Fatalf("Days = %v, want %v", e.Days, want)
+	}
+	for i := range want {
+		if e.Days[i] != want[i] {
+			t.Fatalf("Days = %v, want %v", e.Days, want)
+		}
+	}
+	// Reloaded from DB: still numbers.
+	wl2, err := NewWhitelist(wl.db, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2 := wl2.List()[0]
+	if len(e2.Days) != len(want) || e2.Days[0] != 1 || e2.Days[1] != 3 || e2.Days[2] != 7 {
+		t.Fatalf("Days after reload = %v, want %v", e2.Days, want)
+	}
+}
+
+func TestAdminAddWhitelistNumericDays(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := NewAdmin(wl, NewAccessLog(10), "u", "p", false)
+	body := strings.NewReader(`{"entry":"203.0.113.10","comment":"c","days":[2,4],"start":"08:00","end":"18:00"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/whitelist", body)
+	rec := httptest.NewRecorder()
+	a.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var e WhitelistEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Days) != 2 || e.Days[0] != 2 || e.Days[1] != 4 {
+		t.Fatalf("Days = %v, want [2 4]", e.Days)
+	}
+	if e.StartTime != "08:00" || e.EndTime != "18:00" {
+		t.Fatalf("window = %q-%q", e.StartTime, e.EndTime)
+	}
+}
+
+func TestAdminAllowAttemptScheduled(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	al := NewAccessLog(100)
+	al.Record(Attempt{TS: "t", ClientIP: "203.0.113.9", Allowed: false, Method: "GET", Path: "/v1"})
+	a := NewAdmin(wl, al, "u", "p", false)
+
+	body := strings.NewReader(`{"comment":"ok","days":[1,3],"start":"09:00","end":"17:00"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/attempts/0/allow", body)
+	rec := httptest.NewRecorder()
+	a.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var e WhitelistEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Days) != 2 || e.Days[0] != 1 || e.Days[1] != 3 {
+		t.Fatalf("Days = %v, want [1 3]", e.Days)
+	}
+	if e.StartTime != "09:00" || e.EndTime != "17:00" {
+		t.Fatalf("window = %q-%q", e.StartTime, e.EndTime)
+	}
+	ip := netip.MustParseAddr("203.0.113.9")
+	// days [1,3] = Mon,Wed; window 09:00-17:00. Monday 2026-01-05 12:00 is in window.
+	if ok, reason := wl.checkAt(ip, time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC)); !ok {
+		t.Fatalf("IP should be allowed Monday noon, got reason %q", reason)
+	}
+	if ok, _ := wl.checkAt(ip, time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)); ok {
+		t.Fatal("IP should be denied on Saturday (day not selected)")
+	}
+}
+
+func TestAdminAllowAttemptEmptyBody(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	al := NewAccessLog(100)
+	al.Record(Attempt{TS: "t", ClientIP: "203.0.113.11", Allowed: false, Method: "GET", Path: "/v1"})
+	a := NewAdmin(wl, al, "u", "p", false)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/attempts/0/allow", nil)
+	rec := httptest.NewRecorder()
+	a.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	e := wl.List()[0]
+	if len(e.Days) != 0 || e.StartTime != "" || e.EndTime != "" {
+		t.Fatalf("expected unrestricted allow, got %+v", e)
+	}
+	if e.Comment != "allowed from attempt #0" {
+		t.Fatalf("comment = %q", e.Comment)
+	}
+	if !wl.Allow(netip.MustParseAddr("203.0.113.11")) {
+		t.Fatal("IP should now be allowed")
+	}
+}
+
+func TestAdminAllowAttemptInvalidDays(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	al := NewAccessLog(100)
+	al.Record(Attempt{TS: "t", ClientIP: "203.0.113.12", Allowed: false, Method: "GET", Path: "/v1"})
+	a := NewAdmin(wl, al, "u", "p", false)
+
+	body := strings.NewReader(`{"days":[0]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/attempts/0/allow", body)
+	rec := httptest.NewRecorder()
+	a.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestWhitelistInvalidScheduledEntry(t *testing.T) {
 	wl, err := NewWhitelist(newTestDB(t), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := wl.AddScheduled("203.0.113.7", "", []string{"foo"}, "", ""); err == nil {
-		t.Fatal("expected error for invalid day name")
+	if _, err := wl.AddScheduled("203.0.113.7", "", []int{0}, "", ""); err == nil {
+		t.Fatal("expected error for invalid day 0")
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "", []int{8}, "", ""); err == nil {
+		t.Fatal("expected error for invalid day 8")
 	}
 	if _, err := wl.AddScheduled("203.0.113.7", "", nil, "18:00", "09:00"); err == nil {
 		t.Fatal("expected error for start >= end")

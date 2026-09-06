@@ -46,8 +46,8 @@ which makes IP-based allow-listing useless.
 | `UPSTREAM` | *(required)* | Upstream URL, e.g. `http://llama-cpp-webui.apps:8080` |
 | `ADMIN_USER` | *(required)* | Basic auth user for the admin UI |
 | `ADMIN_PASSWORD` | *(required)* | Basic auth password for the admin UI |
-| `PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener address |
-| `ADMIN_LISTEN` | `0.0.0.0:8081` | Admin listener address |
+| `PROXY_LISTEN` | `127.0.0.1:8080` | Proxy listener address |
+| `ADMIN_LISTEN` | `127.0.0.1:8081` | Admin listener address |
 | `DB_PATH` | `data/whitelist-proxy.db` | SQLite database file (whitelist only) |
 | `TIMEZONE` | `UTC` | IANA location used to evaluate whitelist day/time windows |
 | `LOG_BUFFER_SIZE` | `10000` | Number of access attempts kept in the in-memory ring buffer; oldest entries are evicted when full |
@@ -59,15 +59,20 @@ which makes IP-based allow-listing useless.
 All endpoints require basic auth.
 
 - `GET /api/whitelist` — list entries
-- `POST /api/whitelist` — add entry `{"entry": "IP or CIDR", "comment": "...", "days": ["mon","tue"], "start": "09:00", "end": "17:00"}` (`days`, `start`, `end` optional)
+- `POST /api/whitelist` — add entry `{"entry": "IP or CIDR", "comment": "...", "days": [1,2,3], "start": "09:00", "end": "17:00"}` (`days` numbers 1=Monday … 7=Sunday; `days`, `start`, `end` optional)
 - `DELETE /api/whitelist/{id}` — remove entry
 - `GET /api/attempts?page=&limit=&allowed=&path=` — access attempts (in-memory ring buffer, paginated, filterable by allow status and path)
-- `POST /api/attempts/{id}/allow` — one-click whitelist the IP of a denied attempt
+- `POST /api/attempts/{id}/allow` — one-click whitelist the IP of a denied attempt; optional JSON body `{"comment": "...", "days": [1,2,3], "start": "09:00", "end": "17:00"}` to attach a comment and/or schedule, empty body allows without a window
 
 ## Security notes
 
 - The proxy port rejects connections without a valid PROXY header (`ACCEPT_PROXY=true`).
-  This prevents in-cluster pods from bypassing the funnel to reach the upstream.
+- Both listeners bind to `127.0.0.1` by default: the Tailscale funnel (which forwards to
+  `127.0.0.1:8080`) must be the only network path to the proxy. PROXY protocol is **not**
+  authentication — anyone who can open a TCP connection to the proxy could forge a header
+  claiming any source IP, so keep the port unreachable from everything except the funnel
+  (loopback binding or a NetworkPolicy). Override `PROXY_LISTEN`/`ADMIN_LISTEN` if you need
+  a different topology.
 - Client-supplied `X-Forwarded-For` / `X-Real-IP` headers are always overwritten
   with the real peer IP derived from the PROXY header / socket.
 - An empty whitelist denies everything (fail-closed) — add entries via the admin UI.

@@ -4,26 +4,24 @@ import (
 	"database/sql"
 	"fmt"
 	"net/netip"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-var dayNames = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
-
-func dayToName(d time.Weekday) string { return dayNames[int(d)] }
-func nameToDay(s string) (time.Weekday, bool) {
-	for i, n := range dayNames {
-		if n == strings.ToLower(strings.TrimSpace(s)) {
-			return time.Weekday(i), true
-		}
+// numToWeekday maps a day number (1=Monday ... 7=Sunday) to time.Weekday.
+func numToWeekday(n int) (time.Weekday, bool) {
+	if n < 1 || n > 7 {
+		return 0, false
 	}
-	return 0, false
+	return time.Weekday(n % 7), true
 }
 
-func mustNameToDay(s string) time.Weekday {
-	wd, _ := nameToDay(s)
-	return wd
+// weekdayToNum maps a time.Weekday to a day number (1=Monday ... 7=Sunday).
+func weekdayToNum(d time.Weekday) int {
+	return (int(d)+6)%7 + 1
 }
 
 type WhitelistEntry struct {
@@ -31,7 +29,7 @@ type WhitelistEntry struct {
 	Entry     string `json:"entry"`
 	Comment   string `json:"comment"`
 	CreatedAt string `json:"created_at"`
-	Days      []string `json:"days,omitempty"`
+	Days      []int  `json:"days,omitempty"`
 	StartTime string `json:"start_time,omitempty"`
 	EndTime   string `json:"end_time,omitempty"`
 
@@ -105,13 +103,17 @@ func (w *Whitelist) reload() error {
 		if err != nil {
 			continue
 		}
-		e.Days = []string{}
+		e.Days = []int{}
 		if days.Valid && strings.TrimSpace(days.String) != "" {
 			e.daysSet = map[time.Weekday]bool{}
 			for _, d := range strings.Split(days.String, ",") {
-				if wd, ok := nameToDay(d); ok {
+				n, err := strconv.Atoi(strings.TrimSpace(d))
+				if err != nil {
+					continue
+				}
+				if wd, ok := numToWeekday(n); ok {
 					e.daysSet[wd] = true
-					e.Days = append(e.Days, dayToName(wd))
+					e.Days = append(e.Days, weekdayToNum(wd))
 				}
 			}
 		}
@@ -188,18 +190,25 @@ func (w *Whitelist) Add(entry, comment string) (WhitelistEntry, error) {
 }
 
 // AddScheduled adds a whitelist entry with an optional day list and time window.
-func (w *Whitelist) AddScheduled(entry, comment string, days []string, start, end string) (WhitelistEntry, error) {
+// days uses numbers 1=Monday ... 7=Sunday.
+func (w *Whitelist) AddScheduled(entry, comment string, days []int, start, end string) (WhitelistEntry, error) {
 	if _, err := parseEntry(entry); err != nil {
 		return WhitelistEntry{}, err
 	}
 
-	normalized := []string{}
+	normalized := []int{}
+	seen := map[int]bool{}
 	for _, d := range days {
-		if _, ok := nameToDay(d); !ok {
-			return WhitelistEntry{}, fmt.Errorf("invalid day %q", d)
+		if _, ok := numToWeekday(d); !ok {
+			return WhitelistEntry{}, fmt.Errorf("invalid day %d", d)
 		}
-		normalized = append(normalized, dayToName(mustNameToDay(d)))
+		if seen[d] {
+			continue
+		}
+		seen[d] = true
+		normalized = append(normalized, d)
 	}
+	sort.Ints(normalized)
 
 	if (start != "" && end == "") || (start == "" && end != "") {
 		return WhitelistEntry{}, fmt.Errorf("start and end times must be set together as HH:MM with start < end")
@@ -212,7 +221,11 @@ func (w *Whitelist) AddScheduled(entry, comment string, days []string, start, en
 
 	daysStr := ""
 	if len(normalized) > 0 {
-		daysStr = strings.Join(normalized, ",")
+		parts := make([]string, len(normalized))
+		for i, n := range normalized {
+			parts[i] = strconv.Itoa(n)
+		}
+		daysStr = strings.Join(parts, ",")
 	}
 	var startStr, endStr sql.NullString
 	if start != "" {

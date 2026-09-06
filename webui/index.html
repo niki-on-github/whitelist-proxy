@@ -12,12 +12,36 @@
   table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
   th, td { border: 1px solid #888; padding: .3rem .5rem; text-align: left; font-size: .85rem; }
   th { background: #eee; }
-  input[type=text] { padding: .35rem; margin-right: .5rem; }
+  input[type=text], input[type=time] { padding: .35rem; }
   .ok { color: #0a0; font-weight: bold; }
   .deny { color: #c00; font-weight: bold; }
   form, .filters { margin: 1rem 0; }
   .pager { margin-top: .5rem; }
   #msg { margin: .5rem 0; color: #c00; }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal {
+    background: #fff; color: #111; border: 1px solid #888; border-radius: 6px;
+    padding: 1.25rem; max-width: 30rem; width: 100%; max-height: 90vh; overflow-y: auto;
+  }
+  @media (prefers-color-scheme: dark) {
+    .modal { background: #1e1e1e; color: #eee; }
+  }
+  .modal h2 { margin-top: 0; font-size: 1.1rem; }
+  .field { margin: .6rem 0; }
+  .field label { display: block; margin-bottom: .2rem; font-size: .9rem; }
+  .field input[type=text] { width: 100%; box-sizing: border-box; }
+  fieldset { border: 1px solid #888; border-radius: 4px; margin: .8rem 0; }
+  .daychips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+  .day { border: 1px solid #888; border-radius: 999px; padding: .25rem .6rem; cursor: pointer; font-size: .85rem; }
+  .day input { margin-right: .3rem; }
+  .window { margin: .5rem 0; }
+  .preview { font-size: .85rem; color: #777; margin: .5rem 0; }
+  .actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem; }
+  .actions button { padding: .4rem .9rem; }
 </style>
 </head>
 <body>
@@ -30,14 +54,7 @@
 
 <section id="whitelist">
   <h2>Whitelist</h2>
-  <form id="addForm">
-    <input type="text" id="entry" placeholder="IP or CIDR, e.g. 1.2.3.4 or 10.0.0.0/8" required>
-    <input type="text" id="comment" placeholder="comment (optional)">
-    <input type="text" id="days" placeholder="days (optional, e.g. mon,tue,wed)">
-    <input type="text" id="start" placeholder="start HH:MM (optional)">
-    <input type="text" id="end" placeholder="end HH:MM (optional)">
-    <button type="submit">Add</button>
-  </form>
+  <button onclick="openAddModal()">Add entry</button>
   <table>
     <thead><tr><th>ID</th><th>Entry</th><th>Comment</th><th>Days</th><th>Window</th><th>Created</th><th></th></tr></thead>
     <tbody id="wlBody"></tbody>
@@ -68,9 +85,51 @@
   </div>
 </section>
 
+<div id="modalOverlay" class="overlay" style="display:none">
+  <div class="modal">
+    <h2 id="modalTitle">Add whitelist entry</h2>
+    <form id="entryForm">
+      <div class="field">
+        <label for="mEntry">IP or CIDR</label>
+        <input type="text" id="mEntry" placeholder="1.2.3.4 or 10.0.0.0/8" required>
+      </div>
+      <div class="field">
+        <label for="mComment">Comment</label>
+        <input type="text" id="mComment" placeholder="comment (optional)">
+      </div>
+      <fieldset>
+        <legend><label><input type="checkbox" id="schedToggle"> Limit to schedule (optional)</label></legend>
+        <div id="schedControls">
+          <div class="daychips">
+            <label class="day"><input type="checkbox" value="1">Monday</label>
+            <label class="day"><input type="checkbox" value="2">Tuesday</label>
+            <label class="day"><input type="checkbox" value="3">Wednesday</label>
+            <label class="day"><input type="checkbox" value="4">Thursday</label>
+            <label class="day"><input type="checkbox" value="5">Friday</label>
+            <label class="day"><input type="checkbox" value="6">Saturday</label>
+            <label class="day"><input type="checkbox" value="7">Sunday</label>
+          </div>
+          <div class="window">
+            <span class="label">Time window (server timezone)</span>
+            <input type="time" id="mStart" step="60"> to <input type="time" id="mEnd" step="60">
+          </div>
+        </div>
+      </fieldset>
+      <p id="mPreview" class="preview"></p>
+      <div class="actions">
+        <button type="button" id="modalCancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 let page = 1;
 let limit = 50;
+const FULL_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+let modalMode = 'add';
+let allowId = null;
 
 function show(which) {
   document.getElementById('whitelist').style.display = which === 'whitelist' ? '' : 'none';
@@ -95,11 +154,15 @@ async function loadWhitelist() {
     const body = document.getElementById('wlBody');
     body.innerHTML = entries.map(e =>
       '<tr><td>' + e.id + '</td><td><code>' + escapeHtml(e.entry) + '</code></td><td>' + escapeHtml(e.comment) + '</td>' +
-      '<td>' + escapeHtml((e.days || []).join(',')) + '</td>' +
+      '<td>' + escapeHtml(daysNames(e.days)) + '</td>' +
       '<td>' + escapeHtml(e.start_time && e.end_time ? e.start_time + '-' + e.end_time : '') + '</td>' +
       '<td>' + escapeHtml(e.created_at) + '</td>' +
       '<td><button onclick="delEntry(' + e.id + ')">delete</button></td></tr>').join('');
   } catch (err) { msg(err.message); }
+}
+
+function daysNames(days) {
+  return (days || []).map(d => FULL_DAYS[d - 1]).filter(Boolean).join(', ');
 }
 
 async function delEntry(id) {
@@ -109,26 +172,111 @@ async function delEntry(id) {
   } catch (err) { msg(err.message); }
 }
 
-document.getElementById('addForm').addEventListener('submit', async (ev) => {
+function openAddModal() {
+  modalMode = 'add';
+  allowId = null;
+  document.getElementById('modalTitle').textContent = 'Add whitelist entry';
+  document.getElementById('mEntry').disabled = false;
+  document.getElementById('mEntry').value = '';
+  document.getElementById('mComment').value = '';
+  resetSchedule();
+  showModal();
+}
+
+function openAllowModal(id, ip) {
+  modalMode = 'allow';
+  allowId = id;
+  document.getElementById('modalTitle').textContent = 'Allow IP ' + ip;
+  document.getElementById('mEntry').value = ip;
+  document.getElementById('mEntry').disabled = true;
+  document.getElementById('mComment').value = 'allowed from attempt #' + id;
+  resetSchedule();
+  showModal();
+}
+
+function resetSchedule() {
+  document.getElementById('schedToggle').checked = false;
+  document.querySelectorAll('.day input').forEach(c => c.checked = false);
+  document.getElementById('mStart').value = '';
+  document.getElementById('mEnd').value = '';
+  updateSchedule();
+}
+
+function showModal() {
+  document.getElementById('modalOverlay').style.display = 'flex';
+  document.getElementById('mEntry').focus();
+}
+
+function hideModal() {
+  document.getElementById('modalOverlay').style.display = 'none';
+}
+
+function selectedDays() {
+  const out = [];
+  document.querySelectorAll('.day input:checked').forEach(c => out.push(parseInt(c.value, 10)));
+  return out;
+}
+
+function updateSchedule() {
+  const on = document.getElementById('schedToggle').checked;
+  document.querySelectorAll('.day input').forEach(c => c.disabled = !on);
+  document.getElementById('mStart').disabled = !on;
+  document.getElementById('mEnd').disabled = !on;
+  const days = selectedDays();
+  const start = document.getElementById('mStart').value;
+  const end = document.getElementById('mEnd').value;
+  let text;
+  if (!on || (days.length === 0 && !start)) {
+    text = 'always allowed';
+  } else {
+    const dayText = days.length ? daysNames(days) : 'every day';
+    const timeText = start && end ? ' ' + start + '-' + end : '';
+    text = dayText + timeText;
+  }
+  document.getElementById('mPreview').textContent = 'Rule: ' + text;
+}
+
+document.getElementById('schedToggle').addEventListener('change', updateSchedule);
+document.querySelectorAll('.day input').forEach(c => c.addEventListener('change', updateSchedule));
+document.getElementById('mStart').addEventListener('change', updateSchedule);
+document.getElementById('mEnd').addEventListener('change', updateSchedule);
+
+document.getElementById('modalCancel').addEventListener('click', hideModal);
+document.getElementById('modalOverlay').addEventListener('click', ev => {
+  if (ev.target === document.getElementById('modalOverlay')) hideModal();
+});
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') hideModal(); });
+
+document.getElementById('entryForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  const on = document.getElementById('schedToggle').checked;
+  const days = on ? selectedDays() : [];
+  const start = on ? document.getElementById('mStart').value : '';
+  const end = on ? document.getElementById('mEnd').value : '';
+  if (on) {
+    if ((start && !end) || (!start && end)) { msg('start and end times must be set together'); return; }
+    if (start && end && start >= end) { msg('start must be before end'); return; }
+  }
+  const payload = { comment: document.getElementById('mComment').value.trim() };
+  if (days.length) payload.days = days;
+  if (start && end) { payload.start = start; payload.end = end; }
   try {
-    await api('/api/whitelist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        entry: document.getElementById('entry').value.trim(),
-        comment: document.getElementById('comment').value.trim(),
-        days: document.getElementById('days').value.split(',').map(s => s.trim()).filter(Boolean),
-        start: document.getElementById('start').value.trim(),
-        end: document.getElementById('end').value.trim()
-      })
-    });
-    document.getElementById('entry').value = '';
-    document.getElementById('comment').value = '';
-    document.getElementById('days').value = '';
-    document.getElementById('start').value = '';
-    document.getElementById('end').value = '';
-    loadWhitelist();
+    if (modalMode === 'allow') {
+      await api('/api/attempts/' + allowId + '/allow', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      hideModal();
+      loadAttempts(page);
+      loadWhitelist();
+    } else {
+      payload.entry = document.getElementById('mEntry').value.trim();
+      if (!payload.entry) { msg('entry is required'); return; }
+      await api('/api/whitelist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      hideModal();
+      loadWhitelist();
+    }
   } catch (err) { msg(err.message); }
 });
 
@@ -149,16 +297,9 @@ async function loadAttempts(p) {
       '<td>' + escapeHtml(a.reason || '') + '</td>' +
       '<td>' + escapeHtml(a.method) + '</td><td>' + escapeHtml(a.path + (a.query ? '?' + a.query : '')) + '</td>' +
       '<td>' + a.upstream_status + '</td><td>' + a.duration_ms + '</td>' +
-      '<td>' + (a.allowed ? '' : '<button onclick="allowAttempt(' + a.id + ')">allow IP</button>') + '</td></tr>').join('');
+      '<td>' + (a.allowed ? '' : '<button onclick=\'openAllowModal(' + a.id + ',' + JSON.stringify(a.client_ip) + ')\'>allow IP</button>') + '</td></tr>').join('');
     const totalPages = Math.max(1, Math.ceil(data.total / limit));
     document.getElementById('atInfo').textContent = 'page ' + page + ' of ' + totalPages + ' (' + data.total + ' total)';
-  } catch (err) { msg(err.message); }
-}
-
-async function allowAttempt(id) {
-  try {
-    await api('/api/attempts/' + id + '/allow', { method: 'POST' });
-    loadAttempts(page);
   } catch (err) { msg(err.message); }
 }
 
