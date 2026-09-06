@@ -1,5 +1,6 @@
 data/
 bin/
+/whitelist-proxy
 *.db
 *.db-wal
 *.db-shm
