@@ -15,6 +15,7 @@ import (
 
 	"github.com/pires/go-proxyproto"
 	_ "modernc.org/sqlite"
+	_ "time/tzdata"
 )
 
 const schema = `
@@ -22,7 +23,10 @@ CREATE TABLE IF NOT EXISTS whitelist (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entry TEXT NOT NULL UNIQUE,
   comment TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  days TEXT,
+  start_time TEXT,
+  end_time TEXT
 );
 `
 
@@ -56,7 +60,7 @@ func run() error {
 	}
 	defer db.Close()
 
-	wl, err := NewWhitelist(db)
+	wl, err := NewWhitelist(db, cfg.Location)
 	if err != nil {
 		return err
 	}

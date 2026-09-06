@@ -80,8 +80,11 @@ func (a *Admin) authorized(r *http.Request) bool {
 
 func (a *Admin) addWhitelist(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Entry   string `json:"entry"`
-		Comment string `json:"comment"`
+		Entry   string   `json:"entry"`
+		Comment string   `json:"comment"`
+		Days    []string `json:"days"`
+		Start   string   `json:"start"`
+		End     string   `json:"end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -92,7 +95,7 @@ func (a *Admin) addWhitelist(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry is required"})
 		return
 	}
-	e, err := a.wl.Add(req.Entry, req.Comment)
+	e, err := a.wl.AddScheduled(req.Entry, strings.TrimSpace(req.Comment), req.Days, strings.TrimSpace(req.Start), strings.TrimSpace(req.End))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

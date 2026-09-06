@@ -131,11 +131,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w}
 
-	allowed := p.wl.Allow(ip)
-	reason := ""
-	if !allowed {
-		reason = "ip"
-	} else if !pathAllowed(r.URL.Path, p.allowedPaths) {
+	allowed, reason := p.wl.Check(ip)
+	if allowed && !pathAllowed(r.URL.Path, p.allowedPaths) {
 		allowed = false
 		reason = "path"
 	}

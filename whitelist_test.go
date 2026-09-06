@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -25,7 +26,7 @@ func newTestDB(t *testing.T) *sql.DB {
 }
 
 func TestWhitelistEmptyDeny(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t))
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,7 @@ func TestWhitelistEmptyDeny(t *testing.T) {
 }
 
 func TestWhitelistMatching(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t))
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestWhitelistMatching(t *testing.T) {
 }
 
 func TestWhitelistInvalidEntry(t *testing.T) {
-	wl, err := NewWhitelist(newTestDB(t))
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func newTestProxy(t *testing.T, upstream string) (*Proxy, *AccessLog) {
 
 func newTestProxyWithPaths(t *testing.T, upstream string, allowedPaths []string) (*Proxy, *AccessLog) {
 	t.Helper()
-	wl, err := NewWhitelist(newTestDB(t))
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestAccessLogPathFilter(t *testing.T) {
 
 func TestAccessLogNotPersistedToSQLite(t *testing.T) {
 	db := newTestDB(t)
-	wl, err := NewWhitelist(db)
+	wl, err := NewWhitelist(db, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,5 +326,80 @@ func TestAccessLogNotPersistedToSQLite(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("allowed attempts must also not be persisted; access_log found %d", count)
+	}
+}
+
+func TestWhitelistTimeWindow(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "work hours", nil, "09:00", "17:00"); err != nil {
+		t.Fatal(err)
+	}
+
+	ip := netip.MustParseAddr("203.0.113.7")
+	if ok, reason := wl.checkAt(ip, time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC)); !ok {
+		t.Fatalf("12:00 should be allowed, got reason %q", reason)
+	}
+	if ok, reason := wl.checkAt(ip, time.Date(2026, 1, 5, 8, 59, 0, 0, time.UTC)); ok || reason != "time" {
+		t.Fatalf("08:59 should be denied with reason time, got ok=%v reason=%q", ok, reason)
+	}
+	if ok, reason := wl.checkAt(ip, time.Date(2026, 1, 5, 17, 1, 0, 0, time.UTC)); ok || reason != "time" {
+		t.Fatalf("17:01 should be denied with reason time, got ok=%v reason=%q", ok, reason)
+	}
+}
+
+func TestWhitelistDayWindow(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2026-01-05 is a Monday.
+	if _, err := wl.AddScheduled("203.0.113.7", "weekdays", []string{"mon", "tue", "wed"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ip := netip.MustParseAddr("203.0.113.7")
+	if ok, _ := wl.checkAt(ip, time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)); !ok {
+		t.Fatalf("Monday should be allowed")
+	}
+	if ok, reason := wl.checkAt(ip, time.Date(2026, 1, 10, 10, 0, 0, 0, time.UTC)); ok || reason != "time" {
+		t.Fatalf("Saturday should be denied with reason time, got ok=%v reason=%q", ok, reason)
+	}
+}
+
+func TestWhitelistMixedRestrictedAndOpen(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wl.Add("203.0.113.0/24", "open subnet"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "restricted host", nil, "09:00", "17:00"); err != nil {
+		t.Fatal(err)
+	}
+
+	ip := netip.MustParseAddr("203.0.113.7")
+	// The restricted entry is out of window, but the open subnet entry allows it.
+	if ok, reason := wl.checkAt(ip, time.Date(2026, 1, 5, 20, 0, 0, 0, time.UTC)); !ok {
+		t.Fatalf("open subnet should allow even outside the host window, got reason %q", reason)
+	}
+}
+
+func TestWhitelistInvalidScheduledEntry(t *testing.T) {
+	wl, err := NewWhitelist(newTestDB(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "", []string{"foo"}, "", ""); err == nil {
+		t.Fatal("expected error for invalid day name")
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "", nil, "18:00", "09:00"); err == nil {
+		t.Fatal("expected error for start >= end")
+	}
+	if _, err := wl.AddScheduled("203.0.113.7", "", nil, "09:00", ""); err == nil {
+		t.Fatal("expected error for start without end")
 	}
 }

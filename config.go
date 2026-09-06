@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -18,6 +19,7 @@ type Config struct {
 	AcceptProxy     bool
 	AdminAuth       bool
 	AllowedPaths    []string
+	Location        *time.Location
 }
 
 func env(key, def string) string {
@@ -87,6 +89,11 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	loc, err := time.LoadLocation(env("TIMEZONE", "UTC"))
+	if err != nil {
+		return nil, fmt.Errorf("TIMEZONE must be a valid IANA location: %v", err)
+	}
+
 	return &Config{
 		ProxyListen:      env("PROXY_LISTEN", "0.0.0.0:8080"),
 		AdminListen:      env("ADMIN_LISTEN", "0.0.0.0:8081"),
@@ -98,5 +105,6 @@ func LoadConfig() (*Config, error) {
 		AcceptProxy:      acceptProxy,
 		AdminAuth:        adminAuth,
 		AllowedPaths:     allowedPaths,
+		Location:         loc,
 	}, nil
 }

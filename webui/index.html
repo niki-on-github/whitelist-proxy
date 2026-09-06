@@ -33,10 +33,13 @@
   <form id="addForm">
     <input type="text" id="entry" placeholder="IP or CIDR, e.g. 1.2.3.4 or 10.0.0.0/8" required>
     <input type="text" id="comment" placeholder="comment (optional)">
+    <input type="text" id="days" placeholder="days (optional, e.g. mon,tue,wed)">
+    <input type="text" id="start" placeholder="start HH:MM (optional)">
+    <input type="text" id="end" placeholder="end HH:MM (optional)">
     <button type="submit">Add</button>
   </form>
   <table>
-    <thead><tr><th>ID</th><th>Entry</th><th>Comment</th><th>Created</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Entry</th><th>Comment</th><th>Days</th><th>Window</th><th>Created</th><th></th></tr></thead>
     <tbody id="wlBody"></tbody>
   </table>
 </section>
@@ -91,7 +94,10 @@ async function loadWhitelist() {
     const entries = await api('/api/whitelist');
     const body = document.getElementById('wlBody');
     body.innerHTML = entries.map(e =>
-      '<tr><td>' + e.id + '</td><td><code>' + escapeHtml(e.entry) + '</code></td><td>' + escapeHtml(e.comment) + '</td><td>' + escapeHtml(e.created_at) + '</td>' +
+      '<tr><td>' + e.id + '</td><td><code>' + escapeHtml(e.entry) + '</code></td><td>' + escapeHtml(e.comment) + '</td>' +
+      '<td>' + escapeHtml((e.days || []).join(',')) + '</td>' +
+      '<td>' + escapeHtml(e.start_time && e.end_time ? e.start_time + '-' + e.end_time : '') + '</td>' +
+      '<td>' + escapeHtml(e.created_at) + '</td>' +
       '<td><button onclick="delEntry(' + e.id + ')">delete</button></td></tr>').join('');
   } catch (err) { msg(err.message); }
 }
@@ -109,10 +115,19 @@ document.getElementById('addForm').addEventListener('submit', async (ev) => {
     await api('/api/whitelist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entry: document.getElementById('entry').value.trim(), comment: document.getElementById('comment').value.trim() })
+      body: JSON.stringify({
+        entry: document.getElementById('entry').value.trim(),
+        comment: document.getElementById('comment').value.trim(),
+        days: document.getElementById('days').value.split(',').map(s => s.trim()).filter(Boolean),
+        start: document.getElementById('start').value.trim(),
+        end: document.getElementById('end').value.trim()
+      })
     });
     document.getElementById('entry').value = '';
     document.getElementById('comment').value = '';
+    document.getElementById('days').value = '';
+    document.getElementById('start').value = '';
+    document.getElementById('end').value = '';
     loadWhitelist();
   } catch (err) { msg(err.message); }
 });

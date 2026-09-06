@@ -30,9 +30,14 @@ which makes IP-based allow-listing useless.
 - **Admin port** `8081` — basic-auth protected web UI + JSON API to manage the
   whitelist and to browse access attempts (timestamp, client IP, allow/deny with
   reason, method, path, status, duration).
-- The whitelist (allow list) is stored in a single SQLite database. The **access
-  log lives only in RAM** as a bounded circular buffer (`LOG_BUFFER_SIZE`, default
-  10000 entries) and is **never persisted** — it is lost on restart.
+- The whitelist (allow list) is stored in a single SQLite database. Whitelist
+  entries can optionally be restricted to a day list (`days`) and/or a time
+  window (`start`/`end`, `HH:MM`, `start < end`), evaluated in the configured
+  `TIMEZONE`. If any matching entry has no restriction (or is currently in its
+  window), access is allowed; otherwise it is denied with reason `time`. The
+  **access log lives only in RAM** as a bounded circular buffer
+  (`LOG_BUFFER_SIZE`, default 10000 entries) and is **never persisted** — it is
+  lost on restart.
 
 ## Configuration (environment)
 
@@ -44,6 +49,7 @@ which makes IP-based allow-listing useless.
 | `PROXY_LISTEN` | `0.0.0.0:8080` | Proxy listener address |
 | `ADMIN_LISTEN` | `0.0.0.0:8081` | Admin listener address |
 | `DB_PATH` | `data/whitelist-proxy.db` | SQLite database file (whitelist only) |
+| `TIMEZONE` | `UTC` | IANA location used to evaluate whitelist day/time windows |
 | `LOG_BUFFER_SIZE` | `10000` | Number of access attempts kept in the in-memory ring buffer; oldest entries are evicted when full |
 | `ACCEPT_PROXY` | `true` | Require a valid PROXY protocol header on the proxy port |
 | `ALLOW_PATHS` | *(empty)* | Comma-separated path prefixes that may be proxied (e.g. `/v1`). Empty = all paths allowed. Other paths are denied with the same generic `403` and logged as denied with reason `path`. |
@@ -53,7 +59,7 @@ which makes IP-based allow-listing useless.
 All endpoints require basic auth.
 
 - `GET /api/whitelist` — list entries
-- `POST /api/whitelist` — add entry `{"entry": "IP or CIDR", "comment": "..."}`
+- `POST /api/whitelist` — add entry `{"entry": "IP or CIDR", "comment": "...", "days": ["mon","tue"], "start": "09:00", "end": "17:00"}` (`days`, `start`, `end` optional)
 - `DELETE /api/whitelist/{id}` — remove entry
 - `GET /api/attempts?page=&limit=&allowed=&path=` — access attempts (in-memory ring buffer, paginated, filterable by allow status and path)
 - `POST /api/attempts/{id}/allow` — one-click whitelist the IP of a denied attempt
