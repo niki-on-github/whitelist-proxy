@@ -30,6 +30,12 @@ func NewAdmin(wl *Whitelist, al *AccessLog, user, pass string) *Admin {
 }
 
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/healthz" {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+		return
+	}
+
 	if !a.authorized(r) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="whitelist-proxy admin"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
